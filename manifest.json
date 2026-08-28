@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "id": "nerdyviking.razer-blade",
+  "name": "Razer Blade",
+  "version": "0.1.0",
+  "author": "NerdyViking",
+  "license": "GPL-2.0-or-later",
+  "description": "Bar widget and dropdown for Razer Blade EC control: fan speed, power profiles, boost, charge limit, and live temps.",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "Razer Blade",
+    "description": "Razer Blade fan + thermal control",
+    "category": "System",
+    "allowMultiple": false,
+    "defaultSection": "right"
+  }
+}
