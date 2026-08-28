@@ -152,7 +152,7 @@ Panel {
 
                     Text {
                         id: titleText
-                        text: "RAZER-TUI"
+                        text: "RAZER BLADE"
                         color: root.bar ? root.bar.foreground : Color.foreground
                         font.family: root.bar ? root.bar.fontFamily : Style.font.family
                         font.pixelSize: Style.font.caption
