@@ -29,12 +29,9 @@ userspace driver. Install the backend first:
    [https://github.com/NerdyViking/razer-blade.git](https://github.com/NerdyViking/razer-blade):
 
    ```bash
-   git clone https://github.com/NerdyViking/razer-blade.git
-   cd razer-blade
-   cargo build --release
-   sudo ./scripts/install.sh
-   sudo systemctl enable --now razer-blade-daemon
+   git clone https://github.com/NerdyViking/razer-blade.git && cd razer-blade && git checkout --detach 68cb831c783f9cf032e8109523e1cccef1bb0669 && cargo build --release && sudo ./scripts/install.sh && sudo systemctl enable --now razer-blade-daemon
    ```
+   (Pinned to a full commit so the build always uses the reviewed revision.)
 3. **NVIDIA driver** — optional but recommended: live dGPU temps/util/power
    come from NVML (`nvidia-utils` or `nvidia-open`).
 
