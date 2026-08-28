@@ -432,9 +432,11 @@ Panel {
                                 onMoved: function (v) {
                                     // live visual only; commit once on release
                                 }
-                                onDraggingChanged: {
-                                    if (!dragging && root.manual)
-                                        root.run(["set-fan-rpm", String(rpmSlider.value)])
+                                onReleased: function (v) {
+                                    if (!root.manual)
+                                        return
+                                    root.run(["set-fan-rpm", String(v)])
+                                    root.reload()  // refresh state so the knob keeps the new rpm
                                 }
                             }
                         }
