@@ -51,6 +51,17 @@ Panel {
 
     property var state: ({})
 
+    readonly property bool busy: hostWidget ? hostWidget.pending === true : false
+    readonly property string pendingError: hostWidget ? hostWidget.pendingError : ""
+    readonly property string pendingKind: hostWidget ? hostWidget.pendingKind : ""
+    property double fanCommit: 0
+
+    function exec(args, expected, kind) {
+        if (hostWidget && typeof hostWidget.execute === "function")
+            return hostWidget.execute(args, expected, kind)
+        return false
+    }
+
     function reload() {
         if (hostWidget && "reload" in hostWidget)
             hostWidget.reload()
@@ -166,9 +177,11 @@ Panel {
                         id: statusText
                         text: root.setup
                             ? "SETUP"
-                            : (root.manual
-                               ? "MANUAL " + root.fanRpm + " rpm"
-                               : (root.daemonUp ? "AUTO" : "DAEMON DOWN"))
+                            : (root.busy
+                               ? "WORKING"
+                               : (root.manual
+                                  ? "MANUAL " + root.fanRpm + " rpm"
+                                  : (root.daemonUp ? "AUTO" : "DAEMON DOWN")))
                         color: root.setup
                             ? Color.accent
                             : (root.manual
@@ -204,6 +217,23 @@ Panel {
                         font.pixelSize: Style.font.caption
                         width: parent.width
                         elide: Text.ElideRight
+                    }
+                }
+
+                // ---- command error (execution not confirmed) ----
+                Item {
+                    Layout.fillWidth: true
+                    implicitHeight: pendingErrorText.implicitHeight
+                    visible: root.pendingError !== ""
+
+                    Text {
+                        id: pendingErrorText
+                        text: root.pendingError
+                        color: Color.urgent
+                        font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                        font.pixelSize: Style.font.caption
+                        width: parent.width
+                        wrapMode: Text.WordWrap
                     }
                 }
 
@@ -343,11 +373,12 @@ Panel {
                                 fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
                                 fontSize: Style.font.caption
                                 verticalPadding: Style.space(2)
-                                onClicked: root.run([
+                                enabled: !root.busy
+                                onClicked: root.exec([
                                     "set-boost",
                                     String((root.cpuBoost + 1) % 4),
                                     String(root.gpuBoost),
-                                ])
+                                ], {cpu_boost: (root.cpuBoost + 1) % 4, gpu_boost: root.gpuBoost}, "boost")
                             }
                             Button {
                                 text: "GPU " + root.boostName(root.gpuBoost)
@@ -355,11 +386,12 @@ Panel {
                                 fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
                                 fontSize: Style.font.caption
                                 verticalPadding: Style.space(2)
-                                onClicked: root.run([
+                                enabled: !root.busy
+                                onClicked: root.exec([
                                     "set-boost",
                                     String(root.cpuBoost),
                                     String((root.gpuBoost + 1) % 4),
-                                ])
+                                ], {cpu_boost: root.cpuBoost, gpu_boost: (root.gpuBoost + 1) % 4}, "boost")
                             }
                         }
                         Text {
@@ -408,8 +440,11 @@ Panel {
                             fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
                             fontSize: Style.font.caption
                             verticalPadding: Style.space(2)
-                            onClicked: root.run(root.manual
-                                ? ["set-fan-auto"] : ["set-fan-rpm", String(root.clampMin)])
+                            enabled: !root.busy
+                            onClicked: root.manual
+                                ? root.exec(["set-fan-auto"], {fan_mode: "auto"}, "fan")
+                                : root.exec(["set-fan-rpm", String(root.clampMin)],
+                                    {fan_mode: "manual", fan_rpm: root.clampMin}, "fan")
                         }
 
                         Item {
@@ -426,17 +461,19 @@ Panel {
                                 maximum: root.clampMax
                                 step: 100
                                 integer: true
-                                value: root.fanRpm
-                                enabled: root.manual
+                                value: (root.busy && root.pendingKind === "fan")
+                                    ? root.fanCommit : root.fanRpm
+                                enabled: root.manual && !root.busy
                                 opacity: root.manual ? 1.0 : 0.5
                                 onMoved: function (v) {
                                     // live visual only; commit once on release
                                 }
                                 onReleased: function (v) {
-                                    if (!root.manual)
+                                    if (!root.manual || root.busy)
                                         return
-                                    root.run(["set-fan-rpm", String(v)])
-                                    root.reload()  // refresh state so the knob keeps the new rpm
+                                    root.fanCommit = v
+                                    root.exec(["set-fan-rpm", String(v)],
+                                        {fan_mode: "manual", fan_rpm: v}, "fan")
                                 }
                             }
                         }
@@ -460,14 +497,15 @@ Panel {
                             ToggleSwitch {
                                 id: chargeSwitch
                                 checked: root.bhoOn
-                                interactive: !root.setup
+                                interactive: !root.setup && !root.busy
                                 accent: Color.accent
                                 anchors.right: parent.right
                                 anchors.rightMargin: Style.space(2)
                                 anchors.verticalCenter: parent.verticalCenter
-                                onToggled: root.run(root.bhoOn
-                                    ? ["set-bho", "off"]
-                                    : ["set-bho", "on", String(root.bhoThreshold)])
+                                onToggled: root.bhoOn
+                                    ? root.exec(["set-bho", "off"], {bho_on: false}, "bho")
+                                    : root.exec(["set-bho", "on", String(root.bhoThreshold)],
+                                        {bho_on: true, bho_threshold: root.bhoThreshold}, "bho")
                             }
                         }
                         SectionRow {
@@ -484,10 +522,14 @@ Panel {
                             fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
                             fontSize: Style.font.caption
                             verticalPadding: Style.space(2)
-                            onClicked: root.run([
+                            enabled: !root.busy
+                            onClicked: root.exec([
                                 "set-bho", "on",
                                 String(root.bhoThreshold >= 80 ? 50 : root.bhoThreshold + 5),
-                            ])
+                            ], {
+                                bho_on: true,
+                                bho_threshold: root.bhoThreshold >= 80 ? 50 : root.bhoThreshold + 5,
+                            }, "bho")
                         }
                     }
 
@@ -518,7 +560,9 @@ Panel {
                             fontSize: Style.font.caption
                             verticalPadding: Style.space(2)
                             Layout.fillWidth: true
-                            onClicked: root.run(["set-profile", "balanced"])
+                            enabled: !root.busy
+                            onClicked: root.exec(["set-profile", "balanced"],
+                                {profile: "Balanced"}, "profile")
                         }
                         Button {
                             text: "Gaming"
@@ -528,7 +572,9 @@ Panel {
                             fontSize: Style.font.caption
                             verticalPadding: Style.space(2)
                             Layout.fillWidth: true
-                            onClicked: root.run(["set-profile", "gaming"])
+                            enabled: !root.busy
+                            onClicked: root.exec(["set-profile", "gaming"],
+                                {profile: "Gaming"}, "profile")
                         }
                         Button {
                             text: "Creator"
@@ -538,7 +584,9 @@ Panel {
                             fontSize: Style.font.caption
                             verticalPadding: Style.space(2)
                             Layout.fillWidth: true
-                            onClicked: root.run(["set-profile", "creator"])
+                            enabled: !root.busy
+                            onClicked: root.exec(["set-profile", "creator"],
+                                {profile: "Creator"}, "profile")
                         }
                         Button {
                             text: "Custom"
@@ -548,7 +596,9 @@ Panel {
                             fontSize: Style.font.caption
                             verticalPadding: Style.space(2)
                             Layout.fillWidth: true
-                            onClicked: root.run(["set-profile", "custom", "2", "2"])
+                            enabled: !root.busy
+                            onClicked: root.exec(["set-profile", "custom", "2", "2"],
+                                {profile: "Custom"}, "profile")
                         }
                     }
                 }

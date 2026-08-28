@@ -39,6 +39,57 @@ BarWidget {
         stateProc.running = true
     }
 
+    // ---- pending-execution state ----
+    // set by the panel for any control write; cleared when a state poll
+    // confirms the change or after a 5s timeout (then shown as an error).
+    property bool pending: false
+    property string pendingError: ""
+    property string pendingKind: ""
+    property var _pendingExpected: ({})
+    property int _pendingAt: 0
+
+    function execute(args, expected, kind) {
+        if (root.pending)
+            return false
+        root.pending = true
+        root.pendingError = ""
+        root.pendingKind = kind || "other"
+        root._pendingExpected = expected || {}
+        root._pendingAt = new Date().getTime()
+        Quickshell.execDetached(["razer-ctl"].concat(args), null, null, 1)
+        root.reload()
+        return true
+    }
+
+    function _checkPending() {
+        if (!root.pending)
+            return
+        var st = root.state || {}
+        var e = root._pendingExpected
+        var ok = true
+        for (var k in e) {
+            if (String(st[k]) !== String(e[k])) {
+                ok = false
+                break
+            }
+        }
+        if (ok) {
+            root.pending = false
+            root.pendingKind = ""
+        } else if (new Date().getTime() - root._pendingAt > 5000) {
+            root.pending = false
+            root.pendingKind = ""
+            root.pendingError = "Command not confirmed — reverted to the actual state"
+            pendingErrorTimer.restart()
+        }
+    }
+
+    Timer {
+        id: pendingErrorTimer
+        interval: 6000
+        onTriggered: root.pendingError = ""
+    }
+
     implicitWidth: button.implicitWidth
     implicitHeight: button.implicitHeight
 
@@ -119,6 +170,7 @@ BarWidget {
                         root.state = parsed
                         root.daemonUp = true
                         root.backendSeen = true
+                        root._checkPending()
                     } else {
                         root.daemonUp = false
                     }
