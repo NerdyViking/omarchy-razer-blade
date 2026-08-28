@@ -7,6 +7,8 @@ battery charge limit, and live temps.
 Native Omarchy design language — theme-aware, uses `PanelSlider`,
 `PanelSectionHeader`, `ToggleSwitch` and the shell's style tokens.
 
+![Razer Blade panel](preview.png)
+
 ## Install
 
 ```bash

@@ -154,7 +154,7 @@ BarWidget {
         active: root.manual || root.setup
         useActiveColor: true
         tooltipText: root.setup
-            ? "razer-tui: backend not installed — open the panel for setup"
+            ? "Razer Blade: backend not installed — open the panel for setup"
             : (root.manual
                ? "FAN MANUAL " + root.fanRpm + " rpm · tach " + root.fanTach
                  + "\nCPU " + Math.round(root.cpuTemp) + "° · GPU " + Math.round(root.gpuTemp)
@@ -162,7 +162,7 @@ BarWidget {
                : (root.daemonUp
                   ? "FAN AUTO · CPU " + Math.round(root.cpuTemp) + "° · GPU "
                     + Math.round(root.gpuTemp) + "° · " + root.profile.toUpperCase()
-                  : "RAZER-TUI · daemon down"))
+                  : "RAZER BLADE · daemon down"))
         onPressed: function (buttonCode) {
             if (buttonCode === Qt.LeftButton || buttonCode === Qt.RightButton)
                 root.toggle()
