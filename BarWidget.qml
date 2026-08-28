@@ -46,7 +46,7 @@ BarWidget {
     property string pendingError: ""
     property string pendingKind: ""
     property var _pendingExpected: ({})
-    property int _pendingAt: 0
+    property double _pendingAt: 0
 
     function execute(args, expected, kind) {
         if (root.pending)
