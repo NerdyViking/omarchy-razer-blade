@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 // Razer Blade dropdown panel. Native Omarchy design language (mirrors the
-// audio/network panels): PanelSectionHeader rows, PanelSlider for RPM,
-// ToggleSwitch for charge limit, Button actions.
+// audio/network panels): PanelSectionHeader rows, MIN/BALANCED/MAX fan
+// buttons, ToggleSwitch for charge limit, Button actions.
 // First-run gate: with the backend not installed (no razer-ctl on PATH)
 // the panel shows a SETUP guide instead of the controls.
 import QtQuick
@@ -48,6 +48,7 @@ Panel {
     readonly property int bhoThreshold: state ? (state.bho_threshold || 80) : 80
     readonly property int clampMin: state ? (state.clamp_min || 3500) : 3500
     readonly property int clampMax: state ? (state.clamp_max || 5000) : 5000
+    readonly property int fanMid: Math.round((clampMin + clampMax) / 200) * 100
 
     property var state: ({})
 
@@ -56,10 +57,20 @@ Panel {
     readonly property string pendingKind: hostWidget ? hostWidget.pendingKind : ""
     property double fanCommit: 0
 
+    readonly property int fanSel: (root.busy && root.pendingKind === "fan")
+        ? Math.round(root.fanCommit)
+        : (root.manual ? root.fanRpm : -1)
+
     function exec(args, expected, kind) {
         if (hostWidget && typeof hostWidget.execute === "function")
             return hostWidget.execute(args, expected, kind)
         return false
+    }
+
+    function setFan(rpm) {
+        root.fanCommit = rpm
+        root.exec(["set-fan-rpm", String(rpm)],
+            {fan_mode: "manual", fan_rpm: rpm}, "fan")
     }
 
     function reload() {
@@ -434,47 +445,53 @@ Panel {
 
                         Button {
                             Layout.fillWidth: true
-                            text: root.manual ? "SET TO AUTO" : "SET MANUAL"
+                            text: "SET TO AUTO"
                             active: root.manual
                             accent: root.manual ? Color.urgent : Color.accent
                             fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
                             fontSize: Style.font.caption
                             verticalPadding: Style.space(2)
-                            enabled: !root.busy
-                            onClicked: root.manual
-                                ? root.exec(["set-fan-auto"], {fan_mode: "auto"}, "fan")
-                                : root.exec(["set-fan-rpm", String(root.clampMin)],
-                                    {fan_mode: "manual", fan_rpm: root.clampMin}, "fan")
+                            enabled: root.manual && !root.busy
+                            opacity: root.manual ? 1.0 : 0.5
+                            onClicked: root.exec(["set-fan-auto"], {fan_mode: "auto"}, "fan")
                         }
 
-                        Item {
+                        RowLayout {
                             Layout.fillWidth: true
-                            implicitHeight: rpmSlider.implicitHeight + Style.spacing.controlGap
+                            spacing: Style.space(4)
 
-                            PanelSlider {
-                                id: rpmSlider
-                                bar: root.bar
-                                anchors.fill: parent
-                                anchors.leftMargin: Style.space(2)
-                                anchors.rightMargin: Style.space(2)
-                                minimum: root.clampMin
-                                maximum: root.clampMax
-                                step: 100
-                                integer: true
-                                value: (root.busy && root.pendingKind === "fan")
-                                    ? root.fanCommit : root.fanRpm
-                                enabled: root.manual && !root.busy
-                                opacity: root.manual ? 1.0 : 0.5
-                                onMoved: function (v) {
-                                    // live visual only; commit once on release
-                                }
-                                onReleased: function (v) {
-                                    if (!root.manual || root.busy)
-                                        return
-                                    root.fanCommit = v
-                                    root.exec(["set-fan-rpm", String(v)],
-                                        {fan_mode: "manual", fan_rpm: v}, "fan")
-                                }
+                            Button {
+                                Layout.fillWidth: true
+                                text: "MIN"
+                                active: Math.abs(root.fanSel - root.clampMin) <= 100
+                                accent: Color.accent
+                                fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
+                                fontSize: Style.font.caption
+                                verticalPadding: Style.space(2)
+                                enabled: !root.busy
+                                onClicked: root.setFan(root.clampMin)
+                            }
+                            Button {
+                                Layout.fillWidth: true
+                                text: "BALANCED"
+                                active: Math.abs(root.fanSel - root.fanMid) <= 100
+                                accent: Color.accent
+                                fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
+                                fontSize: Style.font.caption
+                                verticalPadding: Style.space(2)
+                                enabled: !root.busy
+                                onClicked: root.setFan(root.fanMid)
+                            }
+                            Button {
+                                Layout.fillWidth: true
+                                text: "MAX"
+                                active: Math.abs(root.fanSel - root.clampMax) <= 100
+                                accent: Color.accent
+                                fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
+                                fontSize: Style.font.caption
+                                verticalPadding: Style.space(2)
+                                enabled: !root.busy
+                                onClicked: root.setFan(root.clampMax)
                             }
                         }
 

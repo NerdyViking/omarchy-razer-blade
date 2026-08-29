@@ -4,8 +4,8 @@ Bar widget and dropdown panel for **Razer Blade EC control** in the Omarchy
 shell: fan speed (auto or manual RPM), power profiles, CPU/GPU boost,
 battery charge limit, and live temps.
 
-Native Omarchy design language — theme-aware, uses `PanelSlider`,
-`PanelSectionHeader`, `ToggleSwitch` and the shell's style tokens.
+Native Omarchy design language — theme-aware, uses `PanelSectionHeader`,
+`ToggleSwitch` and the shell's style tokens.
 
 ![Razer Blade panel](preview.png)
 
@@ -44,8 +44,7 @@ automatically (no shell restart needed).
 ## Usage
 
 - **Bar**: GPU temp, fan-mode indicator (`+` when manual).
-- **FAN**: AUTO/MANUAL toggle, RPM slider (clamped to the EC range, applied
-  on release), tach readback.
+- **FAN**: SET TO AUTO, plus MIN / BALANCED / MAX (clamped EC range).
 - **PROFILE**: Balanced / Gaming / Creator / Custom.
 - **BOOST**: CPU/GPU boost cycle (Custom profile only).
 - **CHARGE LIMIT**: on/off + threshold cycle.

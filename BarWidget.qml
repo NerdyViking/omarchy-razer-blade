@@ -46,7 +46,6 @@ BarWidget {
     property string pendingError: ""
     property string pendingKind: ""
     property var _pendingExpected: ({})
-    property double _pendingAt: 0
 
     function execute(args, expected, kind) {
         if (root.pending)
@@ -55,10 +54,19 @@ BarWidget {
         root.pendingError = ""
         root.pendingKind = kind || "other"
         root._pendingExpected = expected || {}
-        root._pendingAt = new Date().getTime()
         Quickshell.execDetached(["razer-ctl"].concat(args), null, null, 1)
-        root.reload()
+        pendingTimeout.restart()
+        pendingReload.restart()
         return true
+    }
+
+    function _matches(key, expected, actual) {
+        if (key === "fan_rpm") {
+            var want = Number(expected)
+            var got = Number(actual)
+            return isFinite(want) && isFinite(got) && Math.abs(want - got) <= 100
+        }
+        return String(expected) === String(actual)
     }
 
     function _checkPending() {
@@ -67,21 +75,38 @@ BarWidget {
         var st = root.state || {}
         var e = root._pendingExpected
         var ok = true
+        var n = 0
         for (var k in e) {
-            if (String(st[k]) !== String(e[k])) {
+            n++
+            if (!root._matches(k, e[k], st[k])) {
                 ok = false
                 break
             }
         }
-        if (ok) {
+        if (ok && n > 0) {
             root.pending = false
             root.pendingKind = ""
-        } else if (new Date().getTime() - root._pendingAt > 5000) {
+            pendingTimeout.stop()
+        }
+    }
+
+    Timer {
+        id: pendingTimeout
+        interval: 5000
+        onTriggered: {
+            if (!root.pending)
+                return
             root.pending = false
             root.pendingKind = ""
             root.pendingError = "Command not confirmed — reverted to the actual state"
             pendingErrorTimer.restart()
         }
+    }
+
+    Timer {
+        id: pendingReload
+        interval: 350
+        onTriggered: root.reload()
     }
 
     Timer {
@@ -203,7 +228,7 @@ BarWidget {
             ? "SETUP"
             : (root.gpuTemp > 0 ? Math.round(root.gpuTemp) + "°" : "--°")
               + (root.manual ? "+" : "")
-        active: root.manual || root.setup
+        active: root.setup
         useActiveColor: true
         tooltipText: root.setup
             ? "Razer Blade: backend not installed — open the panel for setup"
