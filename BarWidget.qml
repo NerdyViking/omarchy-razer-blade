@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-// Razer Blade bar widget: GPU temp with fan-mode indicator dot.
-// Data comes from `razer-ctl get-state --json` (needs razer-blade-daemon
-// running and razer-ctl on PATH). First run without the backend shows a
-// setup state ("SETUP") and the panel turns into a HOWTO.
+// Razer Blade bar widget: GPU temp with fan-mode indicator.
+// Data comes from `razer-ctl --json` (needs razer-blade-daemon running
+// and razer-ctl on PATH). First run without the backend shows SETUP.
 import QtQuick
 import Quickshell
 import Quickshell.Io
@@ -15,9 +14,7 @@ BarWidget {
 
     property var state: ({})
     property bool daemonUp: false
-    // True once a get-state succeeded (daemon + razer-ctl both present).
     property bool backendSeen: false
-    // True when the razer-ctl binary exists on PATH (one-shot probe).
     property bool razerCtlPresent: false
     readonly property bool opened: panelLoader.item
         ? panelLoader.item.opened === true : false
@@ -33,86 +30,82 @@ BarWidget {
     readonly property double gpuPower: state.gpu_power || 0
     readonly property double batteryPct: state.battery_pct || 0
     readonly property bool acOnline: state.ac_online || false
-    readonly property bool setup: !root.razerCtlPresent
+    readonly property int watchdogLeft: typeof state.watchdog_remaining_s === "number"
+        ? state.watchdog_remaining_s : -1
+    readonly property int watchdogTimeout: state.watchdog_timeout_s || 30
+    readonly property bool setup: !root.razerCtlPresent && !root.backendSeen
 
-    function reload() {
-        stateProc.running = true
-    }
-
-    // ---- pending-execution state ----
-    // set by the panel for any control write; cleared when a state poll
-    // confirms the change or after a 5s timeout (then shown as an error).
     property bool pending: false
     property string pendingError: ""
     property string pendingKind: ""
-    property var _pendingExpected: ({})
+    property bool _quiet: false
+    readonly property bool commandRunning: cmdProc.running
+    // -1 = auto intent; otherwise last MIN/BALANCED/MAX rpm to heartbeat.
+    property int fanHoldRpm: -1
 
-    function execute(args, expected, kind) {
-        if (root.pending)
+    function reload() {
+        if (root.setup) {
+            if (!probeProc.running)
+                probeProc.running = true
+        } else if (!stateProc.running) {
+            stateProc.running = true
+        }
+    }
+
+    function execute(args, kind, quiet) {
+        if (cmdProc.running)
             return false
-        root.pending = true
-        root.pendingError = ""
-        root.pendingKind = kind || "other"
-        root._pendingExpected = expected || {}
-        Quickshell.execDetached(["razer-ctl"].concat(args), null, null, 1)
-        pendingTimeout.restart()
-        pendingReload.restart()
+        root._quiet = quiet === true
+        if (!root._quiet) {
+            if (root.pending)
+                return false
+            root.pending = true
+            root.pendingError = ""
+            root.pendingKind = kind || "other"
+            pendingTimeout.restart()
+        }
+        cmdProc.command = ["razer-ctl", "--json"].concat(args)
+        cmdProc.running = true
         return true
     }
 
-    function _matches(key, expected, actual) {
-        if (key === "fan_rpm") {
-            var want = Number(expected)
-            var got = Number(actual)
-            return isFinite(want) && isFinite(got) && Math.abs(want - got) <= 100
-        }
-        return String(expected) === String(actual)
-    }
-
-    function _checkPending() {
-        if (!root.pending)
-            return
-        var st = root.state || {}
-        var e = root._pendingExpected
-        var ok = true
-        var n = 0
-        for (var k in e) {
-            n++
-            if (!root._matches(k, e[k], st[k])) {
-                ok = false
-                break
-            }
-        }
-        if (ok && n > 0) {
-            root.pending = false
-            root.pendingKind = ""
-            pendingTimeout.stop()
-        }
-    }
-
-    Timer {
-        id: pendingTimeout
-        interval: 5000
-        onTriggered: {
-            if (!root.pending)
-                return
-            root.pending = false
-            root.pendingKind = ""
-            root.pendingError = "Command not confirmed — reverted to the actual state"
+    function _adoptState(st) {
+        root.state = st
+        root.daemonUp = true
+        root.backendSeen = true
+        if (root.fanHoldRpm >= 0 && !root.pending && (st.fan_mode || "auto") !== "manual") {
+            root.fanHoldRpm = -1
+            root.pendingError = "Fan reverted to auto (watchdog or EC)"
             pendingErrorTimer.restart()
         }
     }
 
-    Timer {
-        id: pendingReload
-        interval: 350
-        onTriggered: root.reload()
+    function tooltipBody() {
+        if (root.setup)
+            return "Razer Blade: backend not installed — open the panel for setup"
+        if (!root.daemonUp)
+            return "RAZER BLADE · daemon down"
+        var temps = "CPU " + Math.round(root.cpuTemp) + "° · GPU "
+            + Math.round(root.gpuTemp) + "° · " + root.profile.toUpperCase()
+        if (!root.manual)
+            return "FAN AUTO · " + temps
+        var lease = root.watchdogLeft >= 0 ? " · " + root.watchdogLeft + "s" : ""
+        return "FAN MANUAL " + root.fanRpm + " rpm" + lease
+            + " · tach " + root.fanTach + "\n" + temps
     }
 
-    Timer {
-        id: pendingErrorTimer
-        interval: 6000
-        onTriggered: root.pendingError = ""
+    function _finishCommand(ok, payload, errText) {
+        if (!root._quiet) {
+            root.pending = false
+            root.pendingKind = ""
+            pendingTimeout.stop()
+        }
+        if (ok && payload && typeof payload === "object") {
+            root._adoptState(payload)
+            return
+        }
+        root.pendingError = errText || (root._quiet ? "Fan hold heartbeat failed" : "Command failed")
+        pendingErrorTimer.restart()
     }
 
     implicitWidth: button.implicitWidth
@@ -168,20 +161,48 @@ BarWidget {
         onTriggered: root.reload()
     }
 
-    // One-shot probe: does the razer-ctl binary exist? Exit-code only
-    // (static shell string — no user input reaches this).
+    Timer {
+        id: heartbeat
+        interval: {
+            var w = root.watchdogTimeout
+            if (!(w > 0))
+                w = 30
+            return Math.max(5000, Math.min(15000, (w / 2) * 1000))
+        }
+        running: root.fanHoldRpm >= 0 && root.daemonUp && !root.pending
+        repeat: true
+        onTriggered: root.execute(
+            ["set-fan-rpm", String(root.fanHoldRpm)], "fan", true)
+    }
+
+    Timer {
+        id: pendingTimeout
+        interval: 5000
+        onTriggered: {
+            if (!root.pending)
+                return
+            root.pending = false
+            root.pendingKind = ""
+            root.pendingError = "Command not confirmed — reverted to the actual state"
+            pendingErrorTimer.restart()
+        }
+    }
+
+    Timer {
+        id: pendingErrorTimer
+        interval: 6000
+        onTriggered: root.pendingError = ""
+    }
+
     Process {
         id: probeProc
         command: ["/bin/sh", "-c", "command -v razer-ctl >/dev/null 2>&1"]
         onExited: function (exitCode) {
             root.razerCtlPresent = exitCode === 0
-            if (!stateProc.running)
+            if (exitCode === 0 && !stateProc.running)
                 stateProc.running = true
         }
     }
-    // Start at root level: all Process children must exist before the
-    // probe runs (it exits before stateProc would be instantiated if
-    // started from its own onCompleted).
     Component.onCompleted: probeProc.running = true
 
     Process {
@@ -191,14 +212,11 @@ BarWidget {
             onStreamFinished: {
                 try {
                     var parsed = JSON.parse(text)
-                    if (parsed && typeof parsed === "object") {
-                        root.state = parsed
-                        root.daemonUp = true
-                        root.backendSeen = true
-                        root._checkPending()
-                    } else {
+                    var st = parsed && parsed.state ? parsed.state : null
+                    if (parsed && parsed.ok && st && typeof st === "object")
+                        root._adoptState(st)
+                    else
                         root.daemonUp = false
-                    }
                 } catch (e) {
                     root.daemonUp = false
                 }
@@ -207,6 +225,33 @@ BarWidget {
         onExited: function (exitCode) {
             if (exitCode !== 0)
                 root.daemonUp = false
+        }
+    }
+
+    Process {
+        id: cmdProc
+        command: ["razer-ctl", "--json", "ping"]
+        stdout: StdioCollector {
+            id: cmdOut
+            waitForEnd: true
+        }
+        stderr: StdioCollector {
+            id: cmdErr
+            waitForEnd: true
+        }
+        onExited: function (exitCode) {
+            var payload = null
+            var errText = ""
+            try {
+                var parsed = JSON.parse(cmdOut.text)
+                if (parsed && parsed.state && typeof parsed.state === "object")
+                    payload = parsed.state
+                if (parsed && parsed.error)
+                    errText = parsed.error
+            } catch (e) {
+                errText = cmdErr.text || "invalid response"
+            }
+            root._finishCommand(exitCode === 0 && !!payload, payload, errText)
         }
     }
 
@@ -230,16 +275,7 @@ BarWidget {
               + (root.manual ? "+" : "")
         active: root.setup
         useActiveColor: true
-        tooltipText: root.setup
-            ? "Razer Blade: backend not installed — open the panel for setup"
-            : (root.manual
-               ? "FAN MANUAL " + root.fanRpm + " rpm · tach " + root.fanTach
-                 + "\nCPU " + Math.round(root.cpuTemp) + "° · GPU " + Math.round(root.gpuTemp)
-                 + "° · " + root.profile.toUpperCase()
-               : (root.daemonUp
-                  ? "FAN AUTO · CPU " + Math.round(root.cpuTemp) + "° · GPU "
-                    + Math.round(root.gpuTemp) + "° · " + root.profile.toUpperCase()
-                  : "RAZER BLADE · daemon down"))
+        tooltipText: root.tooltipBody()
         onPressed: function (buttonCode) {
             if (buttonCode === Qt.LeftButton || buttonCode === Qt.RightButton)
                 root.toggle()
